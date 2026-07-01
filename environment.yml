@@ -1,0 +1,17 @@
+name: torvc
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pyside6>=6.6
+  - opencv
+  - pillow>=10.2
+  - numpy>=1.26
+  - cryptography>=42.0
+  - aiohttp>=3.9
+  - python-sounddevice
+  - opuslib>=3.0.1
+  - pytest>=8.0
+  - pip
+  - pip:
+      - aiohttp-socks>=0.9

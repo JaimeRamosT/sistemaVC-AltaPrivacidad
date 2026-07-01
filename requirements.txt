@@ -1,0 +1,23 @@
+# Alternativa via pip/venv. El flujo recomendado ahora es conda:
+# ver environment.yml (conda env create -f environment.yml).
+# Usa este archivo solo si prefieres pip/venv en vez de conda.
+
+# --- UI ---
+PySide6>=6.6,<7
+
+# --- Red (WSS sobre SOCKS5/Tor) ---
+aiohttp>=3.9
+aiohttp-socks>=0.9
+
+# --- Media ---
+opencv-python-headless>=4.9   # captura de cámara + utilidades de imagen
+Pillow>=10.2                  # codificación/decodificación WebP
+numpy>=1.26
+sounddevice>=0.4.6            # captura/reproducción de audio (PortAudio)
+opuslib>=3.0.1                # códec Opus (requiere libopus instalado en el SO)
+
+# --- Criptografía de sesión (E2E sobre el canal ya anónimo de Tor) ---
+cryptography>=42.0
+
+# --- Dev / tests ---
+pytest>=8.0
