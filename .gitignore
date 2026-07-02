@@ -3,3 +3,16 @@ __pycache__/
 .venv/
 *.log
 .pytest_cache/
+
+# Binarios de Tor vendorizados (se descargan con scripts/fetch_tor.*, no se versionan)
+vendor/tor/windows/*
+!vendor/tor/windows/.gitkeep
+vendor/tor/linux/*
+!vendor/tor/linux/.gitkeep
+vendor/tor/macos/*
+!vendor/tor/macos/.gitkeep
+
+# Artefactos de PyInstaller
+build/
+dist/
+*.spec.bak
