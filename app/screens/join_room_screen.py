@@ -61,5 +61,7 @@ class JoinRoomScreen(QWidget):
             "invalid_credentials": "Número de sala o contraseña incorrectos.",
             "expired": "Las credenciales de esa sala ya expiraron (máx. 30 min).",
             "room_full": "Esa sala ya tiene dos participantes.",
+            "room_not_found": "No hay nadie esperando con ese número de sala y contraseña.",
+            "auth_failed": "No se pudo autenticar ante el servidor (captcha inválido o expirado).",
         }
         self.error_label.setText(mapping.get(reason, f"No se pudo unir a la sala ({reason})."))

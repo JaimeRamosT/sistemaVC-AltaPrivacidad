@@ -54,6 +54,11 @@ class CreateRoomScreen(QWidget):
         hint.setStyleSheet("color: #888; font-size: 12px;")
         layout.addWidget(hint)
 
+        self.warning_label = QLabel("")
+        self.warning_label.setStyleSheet("color: #d9534f; font-size: 12px;")
+        self.warning_label.setWordWrap(True)
+        layout.addWidget(self.warning_label)
+
         layout.addStretch(1)
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.clicked.connect(self.cancel_requested.emit)
@@ -69,6 +74,9 @@ class CreateRoomScreen(QWidget):
         self.password_field.setText(password)
         self._expires_at = expires_at
         self._tick()
+
+    def show_warning(self, text: str) -> None:
+        self.warning_label.setText(text)
 
     def _tick(self) -> None:
         if self._expires_at is None:
