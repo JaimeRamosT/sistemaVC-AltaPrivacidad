@@ -62,6 +62,7 @@ class RelayClient(QThread):
         self._token = token
         self._own_pubkey = own_pubkey
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._main_task: Optional["asyncio.Task"] = None
         self._outbox: "queue.Queue[bytes]" = queue.Queue()
         self._stop_event = threading.Event()
 
@@ -72,7 +73,20 @@ class RelayClient(QThread):
         self._outbox.put(frame_bytes)
 
     def stop(self) -> None:
+        # Ver el comentario equivalente en ws_client.WSClient.stop(): la
+        # bandera sola no interrumpe un await bloqueado (p.ej. dentro de
+        # proxy.connect() con hasta 90s de timeout construyendo el circuito
+        # Tor), y sin eso el hilo real puede seguir vivo mucho después de
+        # que _teardown() suelte la referencia al QThread -- provocando el
+        # "QThread: Destroyed while thread is still running" fatal de Qt.
         self._stop_event.set()
+        loop, task = self._loop, self._main_task
+        if loop is None or task is None or loop.is_closed():
+            return  # el hilo ya terminó por su cuenta -- nada que cancelar
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:
+            pass  # se cerró justo entre el chequeo de arriba y esta llamada
 
     # ------------------------------------------------------------------
     # QThread
@@ -81,7 +95,10 @@ class RelayClient(QThread):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
-            self._loop.run_until_complete(self._main())
+            self._main_task = self._loop.create_task(self._main())
+            self._loop.run_until_complete(self._main_task)
+        except asyncio.CancelledError:
+            pass  # stop() pedido mientras _main() seguía conectando/corriendo
         except Exception as exc:  # pragma: no cover - red en vivo
             self.error.emit(f"Fallo irrecuperable en la conexión al relay: {exc}")
         finally:
@@ -116,11 +133,20 @@ class RelayClient(QThread):
             sender = asyncio.create_task(self._sender_loop(writer))
             receiver = asyncio.create_task(self._receiver_loop(reader))
             stopper = asyncio.create_task(self._stop_watcher())
-            done, pending = await asyncio.wait(
-                {sender, receiver, stopper}, return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in pending:
-                task.cancel()
+            tasks = {sender, receiver, stopper}
+            done: set = set()
+            try:
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                # Ver el comentario equivalente en WSClient._main(): si
+                # stop() cancela _main_task justo mientras esperamos aquí,
+                # la cancelación interrumpe asyncio.wait() sin pasar por el
+                # cleanup normal -- este finally es lo único que corre, y
+                # sin él las tareas quedan sin cancelar ni esperar.
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
             for task in done:
                 exc = task.exception() if not task.cancelled() else None
                 if exc is not None and not isinstance(

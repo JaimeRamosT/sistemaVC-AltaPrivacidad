@@ -55,6 +55,7 @@ class WSClient(QThread):
         self._user_id = user_id
         self._server_url = server_url or config.SERVER_WS_URL
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._main_task: Optional["asyncio.Task"] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._outbox: "queue.Queue[str]" = queue.Queue()
         self._stop_event = threading.Event()
@@ -66,7 +67,24 @@ class WSClient(QThread):
         self._outbox.put(protocol.encode_signal(msg_type, payload))
 
     def stop(self) -> None:
+        # _stop_event por sí solo NO alcanza: solo lo revisan los bucles que
+        # corren DESPUÉS de que la sesión ya está establecida. Si stop() se
+        # llama mientras _main() sigue bloqueado en el captcha o el
+        # handshake del WebSocket (hasta 90s contra un circuito Tor lento),
+        # la bandera nunca se revisa y el hilo real de Python sigue vivo
+        # mucho después de que _teardown() suelte la referencia al QThread
+        # -- eso es exactamente lo que provoca el "QThread: Destroyed while
+        # thread is still running" (fatal en Qt). Cancelar la tarea de
+        # asyncio interrumpe cualquier await en curso, sin importar en qué
+        # fase esté.
         self._stop_event.set()
+        loop, task = self._loop, self._main_task
+        if loop is None or task is None or loop.is_closed():
+            return  # el hilo ya terminó por su cuenta -- nada que cancelar
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:
+            pass  # se cerró justo entre el chequeo de arriba y esta llamada
 
     # ------------------------------------------------------------------
     # QThread
@@ -75,7 +93,10 @@ class WSClient(QThread):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
-            self._loop.run_until_complete(self._main())
+            self._main_task = self._loop.create_task(self._main())
+            self._loop.run_until_complete(self._main_task)
+        except asyncio.CancelledError:
+            pass  # stop() pedido mientras _main() seguía conectando/corriendo
         except Exception as exc:  # pragma: no cover - red en vivo
             self.error.emit(f"Fallo irrecuperable de red: {exc}")
         finally:
@@ -110,12 +131,23 @@ class WSClient(QThread):
                     receiver = asyncio.create_task(self._receiver_loop(ws))
                     heartbeat = asyncio.create_task(self._heartbeat_loop())
                     stopper = asyncio.create_task(self._stop_watcher())
-                    done, pending = await asyncio.wait(
-                        {sender, receiver, heartbeat, stopper},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    for task in pending:
-                        task.cancel()
+                    tasks = {sender, receiver, heartbeat, stopper}
+                    try:
+                        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        # En un cierre normal, esto solo cancela las que
+                        # sigan pendientes. Pero si stop() cancela
+                        # _main_task mientras justo esperábamos aquí, la
+                        # cancelación interrumpe el propio asyncio.wait()
+                        # de arriba sin pasar por ningún cleanup -- este
+                        # finally es lo único que sigue ejecutándose, y sin
+                        # él las cuatro tareas quedarían sin cancelar ni
+                        # esperar (el típico "Task was destroyed but it is
+                        # pending!").
+                        for task in tasks:
+                            if not task.done():
+                                task.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
         except Exception as exc:
             self.error.emit(
                 f"No se pudo conectar al servidor (¿Tor levantado en "
