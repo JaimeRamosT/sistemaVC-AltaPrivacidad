@@ -229,8 +229,18 @@ class CallController(QObject):
         self._relay.start()
 
     def _on_relay_disconnected(self, reason: str) -> None:
+        # RelayClient siempre emite disconnected al terminar, tanto si
+        # llegó a EN_LLAMADA y se cayó después como si nunca logró
+        # conectar (p.ej. timeout de Tor construyendo el circuito, o el
+        # propio relay dando de baja el contenedor por falta de actividad).
+        # Sin este segundo caso, un fallo de conexión al relay dejaba la
+        # llamada trabada para siempre en "Estableciendo canal seguro..."
+        # -- el usuario ya vio el error via error_occurred, pero la app
+        # nunca se recuperaba ni volvía sola al menú.
         if self._status == CallStatus.EN_LLAMADA:
             self._teardown(reason="conexion_con_el_otro_usuario_perdida")
+        elif self._status == CallStatus.NEGOCIANDO_CLAVES:
+            self._teardown(reason="no_se_pudo_conectar_al_relay")
 
     # ------------------------------------------------------------------
     # Internos: clave de sesión + media (RelayClient)
